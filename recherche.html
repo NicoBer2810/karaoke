@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karaoké - Mes chansons</title>
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #12101a; --panel: #1d1a29; --line: #2e2a40;
+    --text: #f3f0fa; --muted: #9a94b0; --accent: #ff4f8b; --accent2: #ffb84f; --ok: #4fd18b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  h1 { margin: 0; font-size: 20px; }
+  h1 span { color: var(--accent); }
+  input[type=search], input[type=text], input[type=password] {
+    width: 100%; min-width: 0; padding: 12px 14px; font-size: 16px;
+    border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button { font: inherit; cursor: pointer; color: var(--text); }
+  button.primary {
+    padding: 12px 16px; font-size: 16px; font-weight: 700; border: 0; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1a0f14; white-space: nowrap;
+  }
+  .screen { padding: 40px 20px; max-width: 420px; margin: 0 auto; text-align: center; }
+  .screen form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+  .screen p { color: var(--muted); }
+  .screen input { text-align: center; font-size: 18px; }
+  .err { color: var(--accent); min-height: 1.2em; font-size: 14px; }
+
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    padding: 12px 16px 0; border-bottom: 1px solid var(--line);
+  }
+  .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 10px; }
+  .who { font-size: 14px; color: var(--muted); text-align: right; }
+  .who b { color: var(--accent2); }
+  .who button { background: none; border: 0; color: var(--muted); text-decoration: underline; padding: 0; font-size: 12px; }
+  .nowline { font-size: 13px; color: var(--muted); margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nowline b { color: var(--text); font-weight: 600; }
+  form.search { display: flex; gap: 8px; }
+  .tabs { display: flex; margin-top: 10px; }
+  .tabs button {
+    flex: 1; background: none; border: 0; color: var(--muted); padding: 10px;
+    border-bottom: 3px solid transparent; font-weight: 600;
+  }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 14px 16px 80px; max-width: 700px; margin: 0 auto; }
+  .status { color: var(--muted); text-align: center; padding: 18px 0; }
+  .item {
+    display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 12px;
+    background: var(--panel); margin-bottom: 8px;
+  }
+  .item img { width: 104px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+  .item .info { flex: 1; min-width: 0; }
+  .item .t { font-size: 14px; line-height: 1.3; }
+  .item .c { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .item .pos { font-size: 12px; color: var(--accent2); margin-top: 3px; font-weight: 600; }
+  .item.playing { border: 1px solid var(--accent); }
+  .add {
+    border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 18px;
+    background: var(--accent); color: #fff; flex-shrink: 0;
+  }
+  .add.done { background: var(--ok); color: #10291b; }
+  .ctrls { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .ctrls button {
+    background: #2a2640; border: 0; border-radius: 8px; width: 38px; height: 30px; font-size: 15px;
+  }
+  .ctrls button:disabled { opacity: .3; cursor: default; }
+  .ctrls .del { color: var(--accent); }
+  .skip { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 10px; padding: 8px 12px; margin: 0 0 14px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(100px);
+    background: var(--ok); color: #10291b; font-weight: 700; padding: 12px 18px; border-radius: 12px;
+    transition: transform .25s; z-index: 30; max-width: 90vw; text-align: center;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<section class="screen" id="s-loading">
+  <h1>🎤 Karao<span>ké</span></h1>
+  <p id="loading-msg">Connexion à l'écran...</p>
+</section>
+
+<section class="screen" id="s-name" style="display:none">
+  <h1>🎤 Karao<span>ké</span></h1>
+  <p>Entre ton nom. Si tu l'as déjà utilisé, tu retrouves ta liste de chansons.</p>
+  <form id="name-form">
+    <input type="text" id="name" maxlength="30" placeholder="Ton nom" autocomplete="given-name">
+    <button class="primary" type="submit">C'est parti</button>
+    <div class="err" id="name-err"></div>
+  </form>
+</section>
+
+<div id="app" style="display:none">
+  <header>
+    <div class="top">
+      <h1>🎤 Karao<span>ké</span></h1>
+      <div class="who">Salut <b id="who-name"></b><br><button type="button" id="logout">Changer de nom</button></div>
+    </div>
+    <div class="nowline">En cours : <b id="now-title">rien</b></div>
+    <form class="search" id="search-form">
+      <input type="search" id="q" placeholder="Titre ou artiste..." autocomplete="off" enterkeyhint="search">
+      <button class="primary" type="submit">Chercher</button>
+    </form>
+    <div class="tabs">
+      <button type="button" class="active" data-tab="results">Recherche</button>
+      <button type="button" data-tab="mine">Mes chansons (<span id="mine-count">0</span>)</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="tab-results">
+      <div class="status" id="status">Cherche une chanson, puis appuie sur + pour l'ajouter à ta liste.</div>
+      <div id="results"></div>
+    </section>
+    <section id="tab-mine" style="display:none">
+      <div id="mine-now"></div>
+      <div id="mine-list"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const API_KEY = "AIzaSyC4cMTSGnBDsvTwey8jKH2d1LcDV--e1Gw";
+  const BROKER = "wss://broker.hivemq.com:8884/mqtt";
+  const NS = "karaoke-thelio-nb";
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  const norm = (s) => (s || "").trim().toLowerCase();
+
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function show(id) {
+    ["s-loading", "s-name", "app"].forEach((s) => { $(s).style.display = s === id ? "block" : "none"; });
+  }
+
+  let client = null;
+  let room = (new URLSearchParams(location.search).get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  let state = null;
+  let me = store.get("kara_name");
+  let gotState = false;
+
+  // ---------- Connexion ----------
+  // Le lien du QR code contient la salle : si l'écran répond, l'accès est accordé sans mot de passe.
+  function connect() {
+    client = mqtt.connect(BROKER, { clientId: "remote-" + Math.random().toString(16).slice(2), reconnectPeriod: 2000, clean: true });
+    client.on("connect", () => {
+      if (room) {
+        client.subscribe(NS + "/" + room + "/state", { qos: 1 });
+        send({ type: "hello" });
+      } else {
+        client.subscribe(NS + "/lobby", { qos: 1 });
+      }
+    });
+    client.on("message", (topic, payload) => {
+      let data;
+      try { data = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (topic === NS + "/lobby") {
+        if (data.room && !room) {
+          room = data.room;
+          client.unsubscribe(NS + "/lobby");
+          client.subscribe(NS + "/" + room + "/state", { qos: 1 });
+          send({ type: "hello" });
+        }
+        return;
+      }
+      state = { now: data.now || null, queue: data.queue || [], users: data.users || [] };
+      if (!gotState) { gotState = true; onRoomReady(); }
+      render();
+    });
+  }
+
+  function onRoomReady() {
+    if (me) enterApp(); else show("s-name");
+  }
+
+  function send(msg) {
+    msg.cid = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    if (me) msg.by = me;
+    if (!client || !client.connected || !room) { toast("Pas connecté à l'écran, réessaie dans un instant", true); return false; }
+    client.publish(NS + "/" + room + "/cmd", JSON.stringify(msg), { qos: 1 });
+    return true;
+  }
+
+  // ---------- Démarrage ----------
+  show("s-loading");
+  connect();
+  setTimeout(() => {
+    if (!gotState) {
+      $("loading-msg").innerHTML = "Impossible de joindre l'écran. Vérifie qu'il est allumé, puis ";
+      const b = document.createElement("button");
+      b.className = "primary"; b.type = "button"; b.textContent = "Réessayer";
+      b.style.marginTop = "12px";
+      b.onclick = () => location.reload();
+      $("loading-msg").append(document.createElement("br"), b);
+    }
+  }, 8000);
+
+  $("name-form").onsubmit = (e) => {
+    e.preventDefault();
+    const raw = $("name").value.trim();
+    if (!raw) { $("name-err").textContent = "Entre un nom"; return; }
+    const existing = (state.users || []).find((u) => norm(u) === norm(raw));
+    me = existing || raw.slice(0, 30);
+    store.set("kara_name", me);
+    send({ type: "join" });
+    if (existing) toast("Content de te revoir, " + existing + " !");
+    enterApp();
+  };
+
+  $("logout").onclick = () => {
+    me = "";
+    store.del("kara_name");
+    $("name").value = "";
+    show("s-name");
+  };
+
+  function enterApp() {
+    $("who-name").textContent = me;
+    show("app");
+    render();
+  }
+
+  // ---------- Onglets ----------
+  document.querySelectorAll(".tabs button").forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+  function showTab(name) {
+    document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    $("tab-results").style.display = name === "results" ? "block" : "none";
+    $("tab-mine").style.display = name === "mine" ? "block" : "none";
+  }
+
+  // ---------- Mes chansons ----------
+  function row(it) {
+    const div = document.createElement("div");
+    div.className = "item";
+    const img = document.createElement("img"); img.src = it.thumb || ""; img.alt = "";
+    const info = document.createElement("div"); info.className = "info";
+    const t = document.createElement("div"); t.className = "t"; t.textContent = it.title;
+    info.append(t);
+    div.append(img, info);
+    return div;
+  }
+
+  function isMine(it) { return it && norm(it.by) === norm(me); }
+
+  function render() {
+    if (!state) return;
+    $("now-title").textContent = state.now ? state.now.title : "rien";
+    if (!me) return;
+
+    const mineNow = $("mine-now"); mineNow.innerHTML = "";
+    if (isMine(state.now)) {
+      const r = row(state.now); r.classList.add("playing");
+      const p = document.createElement("div"); p.className = "pos"; p.textContent = "▶ En train de passer";
+      r.querySelector(".info").append(p);
+      mineNow.append(r);
+      const sk = document.createElement("button"); sk.className = "skip"; sk.type = "button";
+      sk.textContent = "⏭ Arrêter ma chanson";
+      sk.onclick = () => { if (send({ type: "skip" })) toast("Chanson arrêtée"); };
+      mineNow.append(sk);
+    }
+
+    const list = $("mine-list"); list.innerHTML = "";
+    const mine = [];
+    state.queue.forEach((it, idx) => { if (isMine(it)) mine.push({ it, idx }); });
+    $("mine-count").textContent = mine.length;
+    if (!mine.length && !isMine(state.now)) {
+      list.innerHTML = '<div class="status">Ta liste est vide. Cherche une chanson pour l\'ajouter.</div>';
+    }
+    mine.forEach(({ it, idx }, k) => {
+      const r = row(it);
+      const p = document.createElement("div"); p.className = "pos";
+      p.textContent = idx === 0 ? "C'est la prochaine !" : "Position " + (idx + 1) + " dans la file";
+      r.querySelector(".info").append(p);
+      const c = document.createElement("div"); c.className = "ctrls";
+      const up = document.createElement("button"); up.type = "button"; up.textContent = "▲"; up.title = "Monter";
+      up.disabled = k === 0;
+      up.onclick = () => send({ type: "move", uid: it.uid, dir: -1 });
+      const down = document.createElement("button"); down.type = "button"; down.textContent = "▼"; down.title = "Descendre";
+      down.disabled = k === mine.length - 1;
+      down.onclick = () => send({ type: "move", uid: it.uid, dir: 1 });
+      const del = document.createElement("button"); del.type = "button"; del.className = "del"; del.textContent = "✕"; del.title = "Supprimer";
+      del.onclick = () => { if (send({ type: "remove", uid: it.uid })) toast("Chanson supprimée"); };
+      c.append(up, down, del);
+      r.append(c);
+      list.append(r);
+    });
+  }
+
+  // ---------- Recherche ----------
+  function setStatus(msg) { $("status").textContent = msg; $("status").style.display = msg ? "block" : "none"; }
+  function decode(str) { const t = document.createElement("textarea"); t.innerHTML = str; return t.value; }
+
+  $("search-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const raw = $("q").value.trim();
+    if (!raw) return;
+    $("q").blur();
+    showTab("results");
+    $("results").innerHTML = "";
+    setStatus("Recherche...");
+    const url = "https://www.googleapis.com/youtube/v3/search?" + new URLSearchParams({
+      part: "snippet", type: "video", videoEmbeddable: "true", maxResults: "15",
+      q: raw + " karaoké", key: API_KEY, relevanceLanguage: "fr", safeSearch: "moderate"
+    });
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      renderResults(data.items || []);
+    } catch (err) {
+      setStatus("Erreur : " + err.message);
+    }
+  };
+
+  function renderResults(items) {
+    const box = $("results");
+    box.innerHTML = "";
+    if (!items.length) { setStatus("Aucun résultat."); return; }
+    setStatus("");
+    for (const it of items) {
+      const video = {
+        id: it.id.videoId,
+        title: decode(it.snippet.title),
+        thumb: (it.snippet.thumbnails.medium || it.snippet.thumbnails.default).url
+      };
+      const r = row(video);
+      const c = document.createElement("div"); c.className = "c"; c.textContent = decode(it.snippet.channelTitle);
+      r.querySelector(".info").append(c);
+      const btn = document.createElement("button");
+      btn.className = "add"; btn.type = "button"; btn.textContent = "+"; btn.title = "Ajouter à ma liste";
+      btn.onclick = () => {
+        if (send({ type: "add", id: video.id, title: video.title, thumb: video.thumb })) {
+          btn.textContent = "✓"; btn.classList.add("done");
+          toast(state && state.now ? "Ajoutée à ta liste" : "C'est parti, ta chanson démarre !");
+        }
+      };
+      r.append(btn);
+      box.append(r);
+    }
+  }
+
+  let toastTimer = null;
+  function toast(msg, warn) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.style.background = warn ? "var(--accent2)" : "var(--ok)";
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
+  }
+</script>
+</body>
+</html>
