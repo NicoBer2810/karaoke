@@ -317,14 +317,17 @@
     $("results").innerHTML = "";
     setStatus("Recherche...");
     const url = "https://www.googleapis.com/youtube/v3/search?" + new URLSearchParams({
-      part: "snippet", type: "video", videoEmbeddable: "true", maxResults: "15",
-      q: raw + " karaoké", key: API_KEY, relevanceLanguage: "fr", safeSearch: "moderate"
+      part: "snippet", type: "video", videoEmbeddable: "true", maxResults: "20",
+      q: raw + " karaoké karafun", key: API_KEY, relevanceLanguage: "fr", safeSearch: "moderate"
     });
     try {
       const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error.message);
-      renderResults(data.items || []);
+      // KaraFun en premier, le reste ensuite (ordre YouTube conservé dans chaque groupe)
+      const isKarafun = it => /karafun/i.test(it.snippet.channelTitle);
+      const items = data.items || [];
+      renderResults([...items.filter(isKarafun), ...items.filter(it => !isKarafun(it))]);
     } catch (err) {
       setStatus("Erreur : " + err.message);
     }
@@ -342,7 +345,7 @@
         thumb: (it.snippet.thumbnails.medium || it.snippet.thumbnails.default).url
       };
       const r = row(video);
-      const c = document.createElement("div"); c.className = "c"; c.textContent = decode(it.snippet.channelTitle);
+      const c = document.createElement("div"); c.className = "c"; c.textContent = (/karafun/i.test(it.snippet.channelTitle) ? "⭐ " : "") + decode(it.snippet.channelTitle);
       r.querySelector(".info").append(c);
       const btn = document.createElement("button");
       btn.className = "add"; btn.type = "button"; btn.textContent = "+"; btn.title = "Ajouter à ma liste";
