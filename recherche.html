@@ -31,6 +31,7 @@
   .screen form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
   .screen p { color: var(--muted); }
   .screen input { text-align: center; font-size: 18px; }
+  .screen .hint { font-size: 14px; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
   .err { color: var(--accent); min-height: 1.2em; font-size: 14px; }
 
   header {
@@ -97,6 +98,7 @@
     <button class="primary" type="submit">C'est parti</button>
     <div class="err" id="name-err"></div>
   </form>
+  <p class="hint">Votre nom sera l'identifiant vous permettant de retrouver vos chansons toute la soirée.</p>
 </section>
 
 <div id="app" style="display:none">
@@ -183,8 +185,25 @@
       }
       state = { now: data.now || null, queue: data.queue || [], users: data.users || [] };
       if (!gotState) { gotState = true; onRoomReady(); }
+      announceAdds();
       render();
     });
+  }
+
+  // Quand l'écran confirme un ajout, on indique sa place dans la file
+  const pendingAdds = new Set();
+  function announceAdds() {
+    for (const cid of [...pendingAdds]) {
+      if (state.now && state.now.cid === cid) {
+        pendingAdds.delete(cid);
+        toast("C'est parti, ta chanson démarre !");
+        continue;
+      }
+      const idx = state.queue.findIndex((it) => it.cid === cid);
+      if (idx < 0) continue;
+      pendingAdds.delete(cid);
+      toast(idx === 0 ? "Ajoutée : c'est la prochaine !" : "Ajoutée : position " + (idx + 1) + " dans la file");
+    }
   }
 
   function onRoomReady() {
@@ -350,9 +369,11 @@
       const btn = document.createElement("button");
       btn.className = "add"; btn.type = "button"; btn.textContent = "+"; btn.title = "Ajouter à ma liste";
       btn.onclick = () => {
-        if (send({ type: "add", id: video.id, title: video.title, thumb: video.thumb })) {
+        const msg = { type: "add", id: video.id, title: video.title, thumb: video.thumb };
+        if (send(msg)) {
           btn.textContent = "✓"; btn.classList.add("done");
-          toast(state && state.now ? "Ajoutée à ta liste" : "C'est parti, ta chanson démarre !");
+          pendingAdds.add(msg.cid);
+          toast("Ajoutée, en attente de l'écran...");
         }
       };
       r.append(btn);
@@ -367,7 +388,7 @@
     t.style.background = warn ? "var(--accent2)" : "var(--ok)";
     t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 3500);
   }
 </script>
 </body>
