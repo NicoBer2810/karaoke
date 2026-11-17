@@ -267,7 +267,7 @@
   // ---------- Alternance ----------
   // Chaque chanson a un "tour" : chansons déjà chantées par son auteur + son rang parmi ses chansons en attente.
   // Une nouvelle chanson passe devant la première chanson d'un tour plus élevé que le sien.
-  // À tour égal, la chanson déjà présente garde sa place. La prochaine chanson (position 1) ne bouge jamais.
+  // À tour égal, la chanson déjà présente garde sa place.
   function insertFair(item) {
     const sungBy = (name) => state.sung[norm(name)] || 0;
     const queued = {};
@@ -279,7 +279,7 @@
     const turns = state.queue.map(turnOf);
     const myTurn = sungBy(item.by) + state.queue.filter((it) => norm(it.by) === norm(item.by)).length + 1;
     let pos = state.queue.length;
-    for (let i = 1; i < state.queue.length; i++) {
+    for (let i = 0; i < state.queue.length; i++) {
       if (turns[i] > myTurn) { pos = i; break; }
     }
     state.queue.splice(pos, 0, item);
