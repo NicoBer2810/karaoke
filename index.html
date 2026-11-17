@@ -142,11 +142,12 @@
   let room = store.get("kara_room") || newCode(8);
   store.set("kara_room", room);
 
-  let state = { now: null, queue: [], users: [] };
+  let state = { now: null, queue: [], users: [], sung: {} };
   try {
     const saved = JSON.parse(store.get("kara_state_" + room) || "null");
     if (saved && Array.isArray(saved.queue)) state = Object.assign(state, saved);
   } catch (e) {}
+  if (!state.sung || typeof state.sung !== "object") state.sung = {};
   const seen = new Set();
 
   let started = false;
@@ -222,6 +223,7 @@
   // ---------- Lecture ----------
   function playNext() {
     state.now = state.queue.shift() || null;
+    if (state.now) { const k = norm(state.now.by); state.sung[k] = (state.sung[k] || 0) + 1; }
     if (playerReady) {
       if (state.now) player.loadVideoById(state.now.id);
       else player.stopVideo();
@@ -262,6 +264,27 @@
     return clean;
   }
 
+  // ---------- Alternance ----------
+  // Chaque chanson a un "tour" : chansons déjà chantées par son auteur + son rang parmi ses chansons en attente.
+  // Une nouvelle chanson passe devant la première chanson d'un tour plus élevé que le sien.
+  // À tour égal, la chanson déjà présente garde sa place. La prochaine chanson (position 1) ne bouge jamais.
+  function insertFair(item) {
+    const sungBy = (name) => state.sung[norm(name)] || 0;
+    const queued = {};
+    const turnOf = (it) => {
+      const k = norm(it.by);
+      queued[k] = (queued[k] || 0) + 1;
+      return sungBy(it.by) + queued[k];
+    };
+    const turns = state.queue.map(turnOf);
+    const myTurn = sungBy(item.by) + state.queue.filter((it) => norm(it.by) === norm(item.by)).length + 1;
+    let pos = state.queue.length;
+    for (let i = 1; i < state.queue.length; i++) {
+      if (turns[i] > myTurn) { pos = i; break; }
+    }
+    state.queue.splice(pos, 0, item);
+  }
+
   function newUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   // ---------- Synchro ----------
@@ -283,7 +306,7 @@
     if (msg.type === "join") {
       changed();
     } else if (msg.type === "add" && msg.id && by) {
-      state.queue.push({ uid: newUid(), cid: msg.cid || "", id: msg.id, title: msg.title || "Sans titre", thumb: msg.thumb || "", by });
+      insertFair({ uid: newUid(), cid: msg.cid || "", id: msg.id, title: msg.title || "Sans titre", thumb: msg.thumb || "", by });
       if (!state.now && started) playNext(); else changed();
     } else if (msg.type === "remove") {
       const i = state.queue.findIndex((it) => it.uid === msg.uid && mine(it));
