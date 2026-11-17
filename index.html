@@ -266,23 +266,40 @@
 
   // ---------- Alternance ----------
   // Chaque chanson a un "tour" : chansons déjà chantées par son auteur + son rang parmi ses chansons en attente.
-  // Une nouvelle chanson passe devant la première chanson d'un tour plus élevé que le sien.
-  // À tour égal, la chanson déjà présente garde sa place.
-  function insertFair(item) {
-    const sungBy = (name) => state.sung[norm(name)] || 0;
-    const queued = {};
-    const turnOf = (it) => {
+  // La file est recalculée ainsi : on prend toujours la chanson du tour le plus bas,
+  // mais jamais deux fois de suite la même personne (sauf si elle est la seule à attendre).
+  // À tour égal, la chanson arrivée la première passe devant. L'ordre de ses propres chansons est conservé.
+  function rebalance() {
+    const sungBy = (k) => state.sung[k] || 0;
+    const lists = new Map();
+    state.queue.forEach((it, pos) => {
       const k = norm(it.by);
-      queued[k] = (queued[k] || 0) + 1;
-      return sungBy(it.by) + queued[k];
-    };
-    const turns = state.queue.map(turnOf);
-    const myTurn = sungBy(item.by) + state.queue.filter((it) => norm(it.by) === norm(item.by)).length + 1;
-    let pos = state.queue.length;
-    for (let i = 0; i < state.queue.length; i++) {
-      if (turns[i] > myTurn) { pos = i; break; }
+      if (!lists.has(k)) lists.set(k, []);
+      const l = lists.get(k);
+      l.push({ it, pos, turn: sungBy(k) + l.length + 1 });
+    });
+    const out = [];
+    let last = state.now ? norm(state.now.by) : "";
+    while (out.length < state.queue.length) {
+      let best = null, bestKey = "", fallback = null, fallbackKey = "";
+      for (const [k, l] of lists) {
+        if (!l.length) continue;
+        const h = l[0];
+        const better = (a) => !a || h.turn < a.turn || (h.turn === a.turn && h.pos < a.pos);
+        if (k !== last) { if (better(best)) { best = h; bestKey = k; } }
+        else { fallback = h; fallbackKey = k; }
+      }
+      if (!best) { best = fallback; bestKey = fallbackKey; }
+      lists.get(bestKey).shift();
+      out.push(best.it);
+      last = bestKey;
     }
-    state.queue.splice(pos, 0, item);
+    state.queue = out;
+  }
+
+  function insertFair(item) {
+    state.queue.push(item);
+    rebalance();
   }
 
   function newUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -310,7 +327,7 @@
       if (!state.now && started) playNext(); else changed();
     } else if (msg.type === "remove") {
       const i = state.queue.findIndex((it) => it.uid === msg.uid && mine(it));
-      if (i >= 0) { state.queue.splice(i, 1); changed(); }
+      if (i >= 0) { state.queue.splice(i, 1); rebalance(); changed(); }
     } else if (msg.type === "move") {
       const i = state.queue.findIndex((it) => it.uid === msg.uid && mine(it));
       if (i < 0) return;
@@ -319,6 +336,7 @@
       while (j >= 0 && j < state.queue.length && !mine(state.queue[j])) j += step;
       if (j < 0 || j >= state.queue.length) return;
       const tmp = state.queue[i]; state.queue[i] = state.queue[j]; state.queue[j] = tmp;
+      rebalance();
       changed();
     } else if (msg.type === "skip") {
       if (mine(state.now)) playNext();
